@@ -1,0 +1,22 @@
+version: '3.1'
+
+services:
+
+  mongo:
+    image: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+
+  python:
+    image: python:3.8-slim
+    working_dir: /workspace
+    ports:
+      - 3000:3000
+    volumes: 
+        - ./:/workspace
+    tty: true
+    depends_on:
+      - mongo
+    links:
+      - mongo
