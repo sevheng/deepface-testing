@@ -7,16 +7,24 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: root
+    ports:
+      - 27017:27017
 
   python:
-    image: python:3.8-slim
+    build:
+      context: .
+      dockerfile: Dockerfile
     working_dir: /workspace
     ports:
-      - 3000:3000
+      - 8000:8000
     volumes: 
         - ./:/workspace
+        - ./.deepface:/root/.deepface
     tty: true
     depends_on:
       - mongo
     links:
       - mongo
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+    #   - "/dev/video1:/dev/video1"

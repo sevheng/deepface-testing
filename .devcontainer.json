@@ -5,9 +5,7 @@
     "workspaceFolder": "/workspace",
     "extensions": [
         "donjayamanne.python-extension-pack",
-        "brainfit.vscode-importmagic",
-        "gruntfuggly.todo-tree",
-        "littlefoxteam.vscode-python-test-adapter"
+        "ms-toolsai.jupyter",
     ],
     "settings": {
         "terminal.integrated.shell.linux": "/bin/bash",

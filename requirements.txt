@@ -1,2 +1,9 @@
 notebook
 deepface
+matplotlib
+pymongo[srv]
+fastapi[all]
+imutils
+dlib
+uvicorn[standard]
+motor
