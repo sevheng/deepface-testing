@@ -1,0 +1,30 @@
+version: '3.1'
+
+services:
+
+  mongo:
+    image: mongo
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: root
+    ports:
+      - 27017:27017
+
+  python:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /workspace
+    ports:
+      - 8000:8000
+    volumes: 
+        - ./:/workspace
+        - ./.deepface:/root/.deepface
+    command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on:
+      - mongo
+    links:
+      - mongo
+    # devices:
+    #   - "/dev/video0:/dev/video0"
+    #   - "/dev/video1:/dev/video1"
