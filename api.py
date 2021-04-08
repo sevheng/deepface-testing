@@ -57,7 +57,7 @@ async def validate(request: Request, image: UploadFile = File(...), video: Uploa
 
     video_path = save_upload_file_tmp(video)
     image_path = save_upload_file_tmp(image)
-    dateset_path = 'tmp/validate_dataset'
+    dateset_path = f'tmp/validate_dataset_{uuid.uuid4()}'
 
     if not os.path.exists(dateset_path):
         os.makedirs(dateset_path)
