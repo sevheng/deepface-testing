@@ -62,13 +62,14 @@ async def validate(request: Request, image: UploadFile = File(...), video: Uploa
     if not os.path.exists(dateset_path):
         os.makedirs(dateset_path)
 
-    similarity = find_face_similarity(
+    similarity,blurry = find_face_similarity(
         video_path=video_path, image_path=image_path, dateset_path=dateset_path)
 
     os.remove(video_path)
     os.remove(image_path)
     os.rmdir(dateset_path)
 
+    print(f"Video is blurry: {blurry}")
     if similarity:
         content = {
             "status": 1,
@@ -79,6 +80,8 @@ async def validate(request: Request, image: UploadFile = File(...), video: Uploa
             "status": 0,
             "message": "Image is not similar with video frame."
         }
+        if blurry:
+            content['message'] = "Most of video frame are blurry."
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=content)
 
