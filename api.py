@@ -6,7 +6,7 @@ from typing import List, Optional
 import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
 from tqdm import tqdm
-from functions import find_face_similarity, ExtractFace
+from functions import find_face_similarity, ExtractFace, find_face_similarity_test
 from deepface.commons import functions
 from deepface import DeepFace
 import shutil
@@ -53,7 +53,9 @@ def save_upload_file_tmp(upload_file: UploadFile):
 
 
 @app.post("/validate/")
-async def validate(request: Request, image: UploadFile = File(...), video: UploadFile = File(...)):
+async def validate(request: Request,
+                   image: UploadFile = File(...),
+                   video: UploadFile = File(...)):
 
     video_path = save_upload_file_tmp(video)
     image_path = save_upload_file_tmp(image)
@@ -62,8 +64,9 @@ async def validate(request: Request, image: UploadFile = File(...), video: Uploa
     if not os.path.exists(dateset_path):
         os.makedirs(dateset_path)
 
-    similarity,blurry = find_face_similarity(
-        video_path=video_path, image_path=image_path, dateset_path=dateset_path)
+    similarity, blurry = find_face_similarity(video_path=video_path,
+                                              image_path=image_path,
+                                              dateset_path=dateset_path)
 
     os.remove(video_path)
     os.remove(image_path)
@@ -71,10 +74,41 @@ async def validate(request: Request, image: UploadFile = File(...), video: Uploa
 
     print(f"Video is blurry: {blurry}")
     if similarity:
+        content = {"status": 1, **similarity}
+    else:
         content = {
-            "status": 1,
-            **similarity
+            "status": 0,
+            "message": "Image is not similar with video frame."
         }
+        if blurry:
+            content['message'] = "Most of video frame are blurry."
+
+    return JSONResponse(status_code=status.HTTP_200_OK, content=content)
+
+
+@app.post("/validate2/")
+async def validate2(request: Request,
+                    image: UploadFile = File(...),
+                    video: UploadFile = File(...)):
+
+    video_path = save_upload_file_tmp(video)
+    image_path = save_upload_file_tmp(image)
+    dateset_path = f'tmp/validate_dataset_{uuid.uuid4()}'
+
+    if not os.path.exists(dateset_path):
+        os.makedirs(dateset_path)
+
+    similarity, blurry = find_face_similarity_test(video_path=video_path,
+                                                   image_path=image_path,
+                                                   dateset_path=dateset_path)
+
+    os.remove(video_path)
+    os.remove(image_path)
+    os.rmdir(dateset_path)
+
+    print(f"Video is blurry: {blurry}")
+    if similarity:
+        content = {"status": 1, **similarity}
     else:
         content = {
             "status": 0,
@@ -87,7 +121,10 @@ async def validate(request: Request, image: UploadFile = File(...), video: Uploa
 
 
 @app.post("/create-people/")
-async def create_people(request: Request, user_id: int = Form(...), image: UploadFile = File(...), video: UploadFile = File(...)):
+async def create_people(request: Request,
+                        user_id: int = Form(...),
+                        image: UploadFile = File(...),
+                        video: UploadFile = File(...)):
 
     video_path = save_upload_file_tmp(video)
     image_path = save_upload_file_tmp(image)
@@ -102,31 +139,28 @@ async def create_people(request: Request, user_id: int = Form(...), image: Uploa
     for root, directory, files in os.walk(dateset_path):
         for file in files:
             if '.jpg' in file:
-                facial_img_paths.append(root+"/"+file)
+                facial_img_paths.append(root + "/" + file)
 
     model = DeepFace.build_model("Facenet")
     instances = []
     for i in tqdm(range(0, len(facial_img_paths))):
         facial_img_path = facial_img_paths[i]
-        facial_img = functions.preprocess_face(
-            facial_img_path, target_size=(160, 160), detector_backend='ssd', enforce_detection=False)
+        facial_img = functions.preprocess_face(facial_img_path,
+                                               target_size=(160, 160),
+                                               detector_backend='ssd',
+                                               enforce_detection=False)
         embedding = model.predict(facial_img)[0]
 
         instances.append(
             jsonable_encoder(
-                PeopleImageModel(
-                    user_id=user_id, embedding_image=embedding.tolist()
-                )
-            )
-        )
+                PeopleImageModel(user_id=user_id,
+                                 embedding_image=embedding.tolist())))
 
     instances = await request.app.mongodb["deepface"].insert_many(instances)
-    instance = await request.app.mongodb["deepface"].find_one({'_id': instances.inserted_ids[0]})
+    instance = await request.app.mongodb["deepface"].find_one(
+        {'_id': instances.inserted_ids[0]})
 
-    content = {
-        "status": 1,
-        **PeopleImageReadModel(**instance).dict()
-    }
+    content = {"status": 1, **PeopleImageReadModel(**instance).dict()}
 
     os.remove(video_path)
     os.remove(image_path)
@@ -135,20 +169,20 @@ async def create_people(request: Request, user_id: int = Form(...), image: Uploa
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=content)
 
 
-@ app.get("/find-people/")
+@app.get("/find-people/")
 async def list_tasks(request: Request, image: UploadFile = File(...)):
     content = {}
     return JSONResponse(status_code=status.HTTP_200_OK, content=content)
 
 
-@ app.on_event("startup")
+@app.on_event("startup")
 async def startup_db_client():
     app.mongodb_client = AsyncIOMotorClient('mongodb://root:root@mongo')
     app.mongodb = app.mongodb_client['deepface']
     # start client here and reuse in future requests
 
 
-@ app.on_event("shutdown")
+@app.on_event("shutdown")
 async def shutdown_db_client():
     app.mongodb_client.close()
 
