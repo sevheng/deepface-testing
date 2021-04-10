@@ -120,18 +120,19 @@ class ExtractFace:
     saved = 0
 
     # of frames to skip before applying face detection
-    skip = 4
+    skip = 0
 
     # minimum probability to filter weak detections
     confidence = 0.5
 
-    output_dir = "dataset"
+    output_dir = ""
 
     frames = []
+    embeddings = []
 
     model = None
 
-    def __init__(self, output_dir, skip, model=None):
+    def __init__(self, output_dir, skip=4, model=None):
         self.output_dir = output_dir
         self.skip = skip
         self.model = model
@@ -148,16 +149,14 @@ class ExtractFace:
         input_shape = (224, 224)
         if self.model:
             input_shape = functions.find_input_shape(self.model)
-        input_shape_x = input_shape[0]
-        input_shape_y = input_shape[1]
-
         #----------------------------------
 
         face = functions.preprocess_face(img=frame,
-                                         target_size=(input_shape_y,
-                                                      input_shape_x),
+                                         target_size=input_shape,
                                          enforce_detection=False,
                                          detector_backend='ssd')
+
+        # plt.show()
 
         # face = None
         # # grab the frame dimensions and construct a blob from the frame
@@ -189,7 +188,7 @@ class ExtractFace:
 
         return face
 
-    def extract_face_by_frame(self, frame, is_store=False):
+    def extract_face_by_frame(self, frame, need_embedding, is_store=False):
         self.read += 1
 
         # check to see if we should process this frame
@@ -197,17 +196,22 @@ class ExtractFace:
             return
 
         face = self.detect_face(frame)
-
         # write the frame to disk
         if is_store:
             p = os.path.sep.join(
                 [self.output_dir, "{}.jpg".format(self.saved)])
             cv2.imwrite(p, face)
+            # print("[INFO] saved {} to disk".format(p))
         else:
             self.frames.append(face)
+
+        if need_embedding:
+            self.embeddings.append(self.model.predict(face)[0, :])
+
         self.saved += 1
+        # plt.imshow(face[0][:, :, ::-1])
+        # plt.savefig(f'tmp/figure{self.saved}.png')
         return face
-        # print("[INFO] saved {} to disk".format(p))
 
     def extract_by_frame(self, frame, is_store=False):
         self.read += 1
@@ -228,13 +232,33 @@ class ExtractFace:
         # print("[INFO] saved {} to disk".format(p))
 
     @classmethod
-    def extract(cls, video_path, output_dir, is_store):
+    def extract_face_of_image(cls,
+                              image_path,
+                              need_embedding=False,
+                              output_dir='tmp',
+                              model=None,
+                              is_store=False):
+        extract_face = cls(output_dir=output_dir, model=model, skip=1)
+        frame = cv2.imread(image_path)
+        extract_face.extract_face_by_frame(frame=frame,
+                                           is_store=is_store,
+                                           need_embedding=need_embedding)
+        return extract_face.frames, extract_face.embeddings
+
+    @classmethod
+    def extract_video(cls,
+                      video_path,
+                      output_dir='tmp',
+                      model=None,
+                      skip=4,
+                      is_store=False,
+                      only_face=True,
+                      need_embedding=False):
         vs = FileVideoStream(video_path).start()
         fileStream = True
-        # time.sleep(1.0)
 
-        extract_face = cls(output_dir=output_dir)
-
+        extract_face = cls(output_dir=output_dir, skip=skip, model=model)
+        i = 0
         # loop over frames from the video stream
         while True:
             # if this is a file video stream, then we need to check if
@@ -246,11 +270,22 @@ class ExtractFace:
             frame = vs.read()
 
             if not isinstance(frame, type(None)):
-                extract_face.extract_face_by_frame(frame=frame,
-                                                   is_store=is_store)
-
+                frame = imutils.resize(frame, width=360)
+                # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                if only_face:
+                    extract_face.extract_face_by_frame(frame=frame,
+                                                       is_store=is_store,
+                                                       need_embedding=True)
+                else:
+                    extract_face.extract_by_frame(frame=frame,
+                                                  is_store=is_store)
+                i += 1
+            else:
+                break
         # do a bit of cleanup
         vs.stop()
+        print(f"iter : {i}")
+        return extract_face.frames, extract_face.embeddings
 
 
 def detect_blur_fft(image, size=60, thresh=10, vis=False):
@@ -630,3 +665,37 @@ def find_face_similarity_test(video_path, image_path, dateset_path):
     extract_face.clean()
     liveness_detector.clean()
     return result, (i * 0.9) < blurry_count
+
+
+def test(video_path,
+         output_dir,
+         model=None,
+         skip=4,
+         is_store=False,
+         only_face=True):
+    vs = FileVideoStream(video_path).start()
+    fileStream = True
+    # time.sleep(1.0)
+
+    extract_face = ExtractFace(output_dir=output_dir, skip=skip, model=model)
+    i = 0
+    # loop over frames from the video stream
+    while True:
+        # if this is a file video stream, then we need to check if
+        # there any more frames left in the buffer to process
+        if fileStream and not vs.more():
+            break
+
+        # grab the frame from the threaded video file stream
+        frame = vs.read()
+
+        if not isinstance(frame, type(None)):
+            frame = imutils.resize(frame, width=360)
+            # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            extract_face.extract_by_frame(frame=frame, is_store=is_store)
+            i += 1
+        else:
+            break
+    # do a bit of cleanup
+    vs.stop()
+    print(f"iter : {i}")

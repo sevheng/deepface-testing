@@ -2,4 +2,5 @@ tmp/*
 __pycache__
 .vscode
 .DS_Store
+dateset/*
 !.gitkeep

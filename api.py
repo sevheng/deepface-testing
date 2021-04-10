@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI, Request, UploadFile, File, Form, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import List, Optional
+
 import uuid
 from motor.motor_asyncio import AsyncIOMotorClient
 from tqdm import tqdm
@@ -128,50 +128,173 @@ async def create_people(request: Request,
 
     video_path = save_upload_file_tmp(video)
     image_path = save_upload_file_tmp(image)
-    dateset_path = f'tmp/create_{user_id}'
+    # dateset_path = f'tmp/create_{user_id}'
 
-    if not os.path.exists(dateset_path):
-        os.makedirs(dateset_path)
+    # if not os.path.exists(dateset_path):
+    #     os.makedirs(dateset_path)
 
-    ExtractFace.extract(video_path=video_path, output_dir=dateset_path)
+    __, embeddings = ExtractFace.extract_video(video_path=video_path,
+                                               model=app.face_model,
+                                               need_embedding=True,
+                                               skip=4,
+                                               is_store=False,
+                                               only_face=True)
 
-    facial_img_paths = [image_path]
-    for root, directory, files in os.walk(dateset_path):
-        for file in files:
-            if '.jpg' in file:
-                facial_img_paths.append(root + "/" + file)
+    __, image_embeddings = ExtractFace.extract_face_of_image(
+        image_path=image_path,
+        need_embedding=True,
+        # output_dir=dateset_path,
+        model=app.face_model,
+        is_store=False,
+    )
 
-    model = DeepFace.build_model("Facenet")
+    embeddings += image_embeddings
+    
     instances = []
-    for i in tqdm(range(0, len(facial_img_paths))):
-        facial_img_path = facial_img_paths[i]
-        facial_img = functions.preprocess_face(facial_img_path,
-                                               target_size=(160, 160),
-                                               detector_backend='ssd',
-                                               enforce_detection=False)
-        embedding = model.predict(facial_img)[0]
-
-        instances.append(
-            jsonable_encoder(
-                PeopleImageModel(user_id=user_id,
-                                 embedding_image=embedding.tolist())))
+    for embedding in embeddings:
+        # embedding = app.face_model.predict(face)[0]
+        instance = jsonable_encoder(
+            PeopleImageModel(user_id=user_id,
+                             embedding_image=embedding.tolist()))
+        instances.append(instance)
 
     instances = await request.app.mongodb["deepface"].insert_many(instances)
-    instance = await request.app.mongodb["deepface"].find_one(
-        {'_id': instances.inserted_ids[0]})
 
-    content = {"status": 1, **PeopleImageReadModel(**instance).dict()}
+    # instance = await request.app.mongodb["deepface"].find_one(
+    #     {'_id': instances.inserted_ids[0]})
+
+    # content = {"status": 1, **PeopleImageReadModel(**instance).dict()}
+    content = {"status": 1}
 
     os.remove(video_path)
     os.remove(image_path)
-    shutil.rmtree(dateset_path, ignore_errors=True)
+    # shutil.rmtree(dateset_path, ignore_errors=True)
 
     return JSONResponse(status_code=status.HTTP_201_CREATED, content=content)
 
 
-@app.get("/find-people/")
+@app.post("/find-people/")
 async def list_tasks(request: Request, image: UploadFile = File(...)):
-    content = {}
+
+    image_path = save_upload_file_tmp(image)
+    # dateset_path = f"tmp/find_{uuid.uuid4()}"
+
+    __, embeddings = ExtractFace.extract_face_of_image(
+        image_path=image_path,
+        need_embedding=True,
+        # output_dir=dateset_path,
+        model=app.face_model,
+        is_store=False,
+    )
+    # embedding = app.face_model.predict(faces[0])[0]
+
+    pipeline = [
+        {
+            "$addFields": {
+                "target_embedding": embeddings[0].tolist()
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$embedding_image",
+                "includeArrayIndex": "embedding_index"
+            }
+        },
+        {
+            "$unwind": {
+                "path": "$target_embedding",
+                "includeArrayIndex": "target_index"
+            }
+        },
+        {
+            "$project": {
+                "user_id": 1,
+                "embedding_image": 1,
+                "target_embedding": 1,
+                "compare": {
+                    "$cmp": ['$embedding_index', '$target_index']
+                }
+            }
+        },
+        {
+            "$match": {
+                "compare": 0
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+            "_id" : "$_id",
+            "user_id" : "$user_id"
+            },
+                "distance": {
+                    "$sum": {
+                        "$pow": [{
+                            "$subtract":
+                            ['$embedding_image', '$target_embedding']
+                        }, 2]
+                    }
+                }
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "distance": {
+                    "$sqrt": "$distance"
+                }
+            }
+        },
+        {
+            "$project": {
+                "_id": 1,
+                "distance": 1,
+                "cond": {
+                    "$lte": ["$distance", 10]
+                }
+            },
+        },
+        {
+            "$match": {
+                "cond": True
+            }
+        },
+        {
+            "$sort": {
+                "distance": 1
+            }
+        },
+        {
+            "$limit": 10
+        },
+        {
+            "$group": {
+                "_id": {
+                    "user_id": "$_id.user_id",
+                    "cond": "$cond"
+                },
+                "distance": {
+                    "$avg": {
+                        "$cond": [{
+                            "$lte": ["$distance", 10]
+                        }, "$distance", 0]
+                    }
+                }
+            }
+        }
+    ]
+
+    data = {}
+    async for doc in request.app.mongodb["deepface"].aggregate(pipeline):
+        print(f"doc : {doc}")
+        data = {
+            "user_id": doc['_id']['user_id'],
+            "distance": (20 - doc['distance']) / 20,
+        }
+
+    content = {"status": 1, **data}
+
+    os.remove(image_path)
     return JSONResponse(status_code=status.HTTP_200_OK, content=content)
 
 
@@ -179,6 +302,7 @@ async def list_tasks(request: Request, image: UploadFile = File(...)):
 async def startup_db_client():
     app.mongodb_client = AsyncIOMotorClient('mongodb://root:root@mongo')
     app.mongodb = app.mongodb_client['deepface']
+    app.face_model = DeepFace.build_model("Facenet")
     # start client here and reuse in future requests
 
 
