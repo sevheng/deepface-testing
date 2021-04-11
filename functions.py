@@ -618,6 +618,7 @@ def find_face_similarity_test(video_path, image_path, dateset_path):
             # print(f"blurry: {blurry}, mean: {mean}")
             # if not blurry:
             face = extract_face.extract_face_by_frame(frame=frame,
+                                                      need_embedding=False,
                                                       is_store=False)
 
             # model

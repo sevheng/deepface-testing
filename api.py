@@ -11,8 +11,29 @@ from deepface.commons import functions
 from deepface import DeepFace
 import shutil
 from fastapi.encoders import jsonable_encoder
+from fastapi.openapi.utils import get_openapi
 
 app = FastAPI()
+
+
+def custom_openapi():
+    # if app.openapi_schema:
+    #     return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="POC Testing",
+        version="0",
+        description="",
+        routes=app.routes,
+    )
+    openapi_schema["info"]["x-logo"] = {
+        "url":
+        "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcSG8-8hMTgdX4E7qFZGbsLau2iTiC4CKB2ftQ&usqp=CAU"
+    }
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+app.openapi = custom_openapi
 
 
 class PeopleImageModel(BaseModel):
@@ -149,7 +170,7 @@ async def create_people(request: Request,
     )
 
     embeddings += image_embeddings
-    
+
     instances = []
     for embedding in embeddings:
         # embedding = app.face_model.predict(face)[0]
@@ -188,101 +209,87 @@ async def list_tasks(request: Request, image: UploadFile = File(...)):
     )
     # embedding = app.face_model.predict(faces[0])[0]
 
-    pipeline = [
-        {
-            "$addFields": {
-                "target_embedding": embeddings[0].tolist()
+    pipeline = [{
+        "$addFields": {
+            "target_embedding": embeddings[0].tolist()
+        }
+    }, {
+        "$unwind": {
+            "path": "$embedding_image",
+            "includeArrayIndex": "embedding_index"
+        }
+    }, {
+        "$unwind": {
+            "path": "$target_embedding",
+            "includeArrayIndex": "target_index"
+        }
+    }, {
+        "$project": {
+            "user_id": 1,
+            "embedding_image": 1,
+            "target_embedding": 1,
+            "compare": {
+                "$cmp": ['$embedding_index', '$target_index']
             }
-        },
-        {
-            "$unwind": {
-                "path": "$embedding_image",
-                "includeArrayIndex": "embedding_index"
-            }
-        },
-        {
-            "$unwind": {
-                "path": "$target_embedding",
-                "includeArrayIndex": "target_index"
-            }
-        },
-        {
-            "$project": {
-                "user_id": 1,
-                "embedding_image": 1,
-                "target_embedding": 1,
-                "compare": {
-                    "$cmp": ['$embedding_index', '$target_index']
-                }
-            }
-        },
-        {
-            "$match": {
-                "compare": 0
-            }
-        },
-        {
-            "$group": {
-                "_id": {
-            "_id" : "$_id",
-            "user_id" : "$user_id"
+        }
+    }, {
+        "$match": {
+            "compare": 0
+        }
+    }, {
+        "$group": {
+            "_id": {
+                "_id": "$_id",
+                "user_id": "$user_id"
             },
-                "distance": {
-                    "$sum": {
-                        "$pow": [{
-                            "$subtract":
-                            ['$embedding_image', '$target_embedding']
-                        }, 2]
-                    }
-                }
-            }
-        },
-        {
-            "$project": {
-                "_id": 1,
-                "distance": {
-                    "$sqrt": "$distance"
-                }
-            }
-        },
-        {
-            "$project": {
-                "_id": 1,
-                "distance": 1,
-                "cond": {
-                    "$lte": ["$distance", 10]
-                }
-            },
-        },
-        {
-            "$match": {
-                "cond": True
-            }
-        },
-        {
-            "$sort": {
-                "distance": 1
-            }
-        },
-        {
-            "$limit": 10
-        },
-        {
-            "$group": {
-                "_id": {
-                    "user_id": "$_id.user_id",
-                    "cond": "$cond"
-                },
-                "distance": {
-                    "$avg": {
-                        "$cond": [{
-                            "$lte": ["$distance", 10]
-                        }, "$distance", 0]
-                    }
+            "distance": {
+                "$sum": {
+                    "$pow": [{
+                        "$subtract": ['$embedding_image', '$target_embedding']
+                    }, 2]
                 }
             }
         }
-    ]
+    }, {
+        "$project": {
+            "_id": 1,
+            "distance": {
+                "$sqrt": "$distance"
+            }
+        }
+    }, {
+        "$project": {
+            "_id": 1,
+            "distance": 1,
+            "cond": {
+                "$lte": ["$distance", 10]
+            }
+        },
+    }, {
+        "$match": {
+            "cond": True
+        }
+    }, {
+        "$sort": {
+            "distance": 1
+        }
+    }, {
+        "$limit": 10
+    }, {
+        "$group": {
+            "_id": {
+                "user_id": "$_id.user_id",
+                "cond": "$cond"
+            },
+            "distance": {
+                "$avg": {
+                    "$cond": [{
+                        "$lte": ["$distance", 10]
+                    }, "$distance", 0]
+                }
+            }
+        }
+    }]
 
     data = {}
     async for doc in request.app.mongodb["deepface"].aggregate(pipeline):
