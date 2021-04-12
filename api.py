@@ -296,7 +296,7 @@ async def list_tasks(request: Request, image: UploadFile = File(...)):
         print(f"doc : {doc}")
         data = {
             "user_id": doc['_id']['user_id'],
-            "distance": (20 - doc['distance']) / 20,
+            "similarity_avg": (20 - doc['distance']) / 20,
         }
 
     content = {"status": 1, **data}

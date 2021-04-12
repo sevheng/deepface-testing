@@ -240,6 +240,7 @@ class ExtractFace:
                               is_store=False):
         extract_face = cls(output_dir=output_dir, model=model, skip=1)
         frame = cv2.imread(image_path)
+
         extract_face.extract_face_by_frame(frame=frame,
                                            is_store=is_store,
                                            need_embedding=need_embedding)
